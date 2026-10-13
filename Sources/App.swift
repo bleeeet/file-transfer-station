@@ -610,7 +610,56 @@ struct MainView: View {
     }
 }
 
+/// 启动时查 GitHub 最新 Release；有新版且用户同意，就下载 zip、替换当前 .app 并重启。
+enum Updater {
+    static let latest = URL(string: "https://api.github.com/repos/bleeeet/file-transfer-station/releases/latest")!
+    static var current: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
+
+    static func check() {
+        URLSession.shared.dataTask(with: latest) { data, _, _ in
+            guard let data, let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let tag = json["tag_name"] as? String, isNewerVersion(tag, than: current),
+                  let assets = json["assets"] as? [[String: Any]],
+                  let link = assets.compactMap({ $0["browser_download_url"] as? String }).first(where: { $0.hasSuffix(".zip") }),
+                  let url = URL(string: link) else { return }
+            DispatchQueue.main.async { offer(tag, notes: json["body"] as? String ?? "", from: url) }
+        }.resume()
+    }
+
+    static func offer(_ tag: String, notes: String, from url: URL) {
+        let alert = NSAlert(); alert.messageText = "发现新版本 \(tag)"
+        alert.informativeText = "当前版本 \(current)。\n\n\(notes)".trimmingCharacters(in: .whitespacesAndNewlines)
+        alert.addButton(withTitle: "立即更新"); alert.addButton(withTitle: "以后再说")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard Model.active?.busy != true, Model.active?.loginRunning != true else { return show("正在传输或登录，完成后重新打开应用即可更新。") }
+        Model.active?.status = "正在下载更新 \(tag)…"
+        URLSession.shared.downloadTask(with: url) { file, _, error in
+            do {
+                guard let file else { throw error ?? URLError(.badServerResponse) }
+                let target = Bundle.main.bundleURL
+                let dir = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: target, create: true)
+                let unzip = Process(); unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto"); unzip.arguments = ["-x", "-k", file.path, dir.path]
+                try unzip.run(); unzip.waitUntilExit()
+                guard unzip.terminationStatus == 0,
+                      let app = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil).first(where: { $0.pathExtension == "app" }),
+                      Bundle(url: app)?.bundleIdentifier == Bundle.main.bundleIdentifier else { throw URLError(.cannotDecodeContentData) }
+                _ = try FileManager.default.replaceItemAt(target, withItemAt: app)
+                try? FileManager.default.removeItem(at: dir)
+                DispatchQueue.main.async {
+                    let relaunch = Process(); relaunch.executableURL = URL(fileURLWithPath: "/usr/bin/open"); relaunch.arguments = ["-n", target.path]
+                    try? relaunch.run(); NSApp.terminate(nil)
+                }
+            } catch {
+                DispatchQueue.main.async { Model.active?.status = "更新失败"; show("更新失败：\(error.localizedDescription)\n可到 GitHub Releases 手动下载。") }
+            }
+        }.resume()
+    }
+
+    static func show(_ text: String) { let a = NSAlert(); a.messageText = text; a.runModal() }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) { Updater.check() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) {
         for process in [Model.active?.process, Model.active?.loginProcess].compactMap({ $0 }) where process.isRunning {

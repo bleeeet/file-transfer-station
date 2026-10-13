@@ -36,3 +36,9 @@
 网页登录改为百度通行证登录页（tpl=netdisk）并使用 Safari 标识，避免网盘首页在内嵌浏览器中空白；登录后自动进入网盘页获取 STOKEN 再导入。
 
 扫码登录改为原生实现：内嵌通行证页面在手机确认后不跳转、拿不到 BDUSS，现由应用直接请求二维码、轮询确认并换取网盘 STOKEN。
+
+## 自动更新与发版
+
+应用每次启动会查询 GitHub 仓库 `bleeeet/file-transfer-station` 的最新 Release；版本号比当前新时弹窗，点「立即更新」后下载 zip、替换当前 `.app` 并重启。正在传输或登录时不替换。没有网络或查询失败时静默跳过。
+
+多台电脑协作发版：拉取最新代码 → 改 `Resources/Info.plist` 的 `CFBundleShortVersionString`（如 0.2.0 → 0.3.0）→ 提交并推送 → 运行 `./release.sh "更新说明"`。脚本会构建、打包到 `安装包/` 并创建 GitHub Release（需已 `gh auth login`）。其他电脑打开应用即收到更新。

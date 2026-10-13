@@ -107,3 +107,14 @@ func loginResultLines(_ output: String) -> String {
         .filter { !$0.isEmpty && !$0.contains("BaiduPCS-Go >") && !$0.contains("--cookies") && !$0.contains("BDUSS=") && !$0.hasPrefix("提示:") }
         .joined(separator: "\n")
 }
+
+/// "v0.10.0" 比 "0.9.1" 新；逐段按数字比较，缺的段当 0。
+func isNewerVersion(_ candidate: String, than current: String) -> Bool {
+    func parts(_ v: String) -> [Int] { v.trimmingCharacters(in: CharacterSet(charactersIn: "vV")).split(separator: ".").map { Int($0) ?? 0 } }
+    let a = parts(candidate), b = parts(current)
+    for i in 0..<max(a.count, b.count) {
+        let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+        if x != y { return x > y }
+    }
+    return false
+}

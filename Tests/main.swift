@@ -60,3 +60,8 @@ try FileManager.default.createDirectory(at: bare, withIntermediateDirectories: t
 precondition(leafFolders(bare) == ["单层"])
 try FileManager.default.removeItem(at: tree)
 print("上传前文件夹结构：全部通过")
+precondition(isNewerVersion("v0.2.0", than: "0.1.0"))
+precondition(isNewerVersion("v0.10.0", than: "0.9.1"))
+precondition(!isNewerVersion("v0.1.0", than: "0.1.0"))
+precondition(!isNewerVersion("0.1", than: "0.1.0"))
+precondition(!isNewerVersion("v0.1.9", than: "0.2.0"))
