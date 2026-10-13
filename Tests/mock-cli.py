@@ -44,7 +44,7 @@ elif cmd == 'mv':
     for name in args[1:-1]: shutil.move(str(target(name)), str(target(args[-1])))
     print('操作成功, 以下文件/目录移动成功:')
 elif cmd == 'rm':
-    p = target(args[1]); p.rmdir(); print('删除成功')
+    p = target(args[1]); (shutil.rmtree(p) if p.is_dir() else p.unlink()); print('操作成功, 以下文件/目录删除成功:\n' + args[1])
 elif cmd == 'download':
     dest = pathlib.Path(args[args.index('--saveto') + 1]); p = target(args[-1]); dest.mkdir(parents=True, exist_ok=True)
     (shutil.copytree if p.is_dir() else shutil.copy2)(p, dest / p.name)

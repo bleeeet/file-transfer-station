@@ -23,6 +23,7 @@ final class Model: ObservableObject {
     var webLogin = false
     var loginOutput = ""
     var loginDirectory: URL?
+    @Published var selected: RemoteEntry?
     @Published var progress: Double? = nil
     @Published var progressText = ""
     let station = "/文件中转站"
@@ -99,7 +100,9 @@ final class Model: ObservableObject {
         return try parseListing(text, path: remote)
     }
     func refresh(_ remote: String? = nil) {
-        let target = remote ?? path
+        // Only the station and its subfolders are browsable.
+        let requested = remote ?? path
+        let target = requested == station || requested.hasPrefix(station + "/") ? requested : station
         start("正在读取文件夹…") {
             let (who, _) = try self.run(["who"])
             guard let name = loggedInAccount(who) else {
@@ -206,6 +209,27 @@ final class Model: ObservableObject {
                 catch { completion(error); DispatchQueue.main.async { self.status = "未完成：" + self.safe(error.localizedDescription); self.progress = nil } }
                 DispatchQueue.main.async { self.busy = false }
             }
+        }
+    }
+    func canDelete(_ item: RemoteEntry?) -> Bool { item.map { $0.path.hasPrefix(station + "/") } ?? false }
+    func confirmDelete(_ item: RemoteEntry) {
+        guard canDelete(item), !busy, !loginRunning else { return }
+        let alert = NSAlert(); alert.messageText = "删除「\(item.name)」？"
+        alert.informativeText = (item.isDirectory ? "整个文件夹及其中内容都会删除。" : "") + "删除后可在百度网盘回收站找回。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "删除"); alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        delete(item)
+    }
+    func delete(_ item: RemoteEntry) {
+        let folder = path
+        start("正在删除 \(item.name)…") {
+            let (text, code) = try self.run(["rm", literalRemotePath(item.path)])
+            let items = try self.list(folder)
+            DispatchQueue.main.async { self.entries = items }
+            // Judge by the listing, not the CLI's wording.
+            guard code == 0, !items.contains(where: { $0.path == item.path }) else { throw self.failure("删除失败：" + transferFailureLines(text)) }
+            DispatchQueue.main.async { self.status = "已删除 \(item.name) · 可在网盘回收站找回" }
         }
     }
     func stop() {
@@ -475,7 +499,7 @@ struct CloudTable: NSViewRepresentable {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id)); column.title = title; column.width = width; table.addTableColumn(column)
         }
         table.target = context.coordinator; table.doubleAction = #selector(Coordinator.openRow)
-        let menu = NSMenu(); let download = NSMenuItem(title: "下载到…", action: #selector(Coordinator.downloadRow), keyEquivalent: ""); download.target = context.coordinator; menu.addItem(download); table.menu = menu
+        let menu = NSMenu(); menu.delegate = context.coordinator; table.menu = menu
         table.setDraggingSourceOperationMask(.copy, forLocal: false)
         context.coordinator.table = table
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.documentView = table; return scroll
@@ -485,8 +509,9 @@ struct CloudTable: NSViewRepresentable {
         let old = context.coordinator.items, new = model.entries
         guard old.map(\.id) != new.map(\.id) || old.map(\.modified) != new.map(\.modified) else { return }
         context.coordinator.items = new; (view.documentView as? NSTableView)?.reloadData()
+        DispatchQueue.main.async { model.selected = nil }
     }
-    final class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource, NSFilePromiseProviderDelegate {
+    final class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource, NSFilePromiseProviderDelegate, NSMenuDelegate {
         let model: Model; var items: [RemoteEntry] = []; weak var table: NSTableView?
         init(_ model: Model) { self.model = model }
         func numberOfRows(in tableView: NSTableView) -> Int { items.count }
@@ -503,6 +528,17 @@ struct CloudTable: NSViewRepresentable {
         }
         @objc func openRow() { guard let row = table?.clickedRow, items.indices.contains(row) else { return }; if items[row].isDirectory { model.refresh(items[row].path) } else { model.chooseDownload(items[row]) } }
         @objc func downloadRow() { guard let row = table?.clickedRow, items.indices.contains(row) else { return }; model.chooseDownload(items[row]) }
+        @objc func deleteRow() { guard let row = table?.clickedRow, items.indices.contains(row) else { return }; model.confirmDelete(items[row]) }
+        func tableViewSelectionDidChange(_ notification: Notification) {
+            let row = table?.selectedRow ?? -1
+            model.selected = items.indices.contains(row) ? items[row] : nil
+        }
+        func menuNeedsUpdate(_ menu: NSMenu) {
+            menu.removeAllItems()
+            guard let row = table?.clickedRow, items.indices.contains(row), !model.busy, !model.loginRunning else { return }
+            menu.addItem(withTitle: "下载到…", action: #selector(downloadRow), keyEquivalent: "").target = self
+            if model.canDelete(items[row]) { menu.addItem(withTitle: "删除", action: #selector(deleteRow), keyEquivalent: "").target = self }
+        }
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
             guard !model.busy else { return nil }
             let item = items[row]
@@ -537,8 +573,7 @@ struct MainView: View {
             }.padding(18)
             Divider()
             HStack {
-                Button { model.refresh("/") } label: { Image(systemName: "house") }.help("网盘根目录")
-                Button { model.refresh((model.path as NSString).deletingLastPathComponent.isEmpty ? "/" : (model.path as NSString).deletingLastPathComponent) } label: { Image(systemName: "chevron.up") }.help("上一级")
+                Button { model.refresh((model.path as NSString).deletingLastPathComponent) } label: { Image(systemName: "chevron.up") }.help("上一级").disabled(model.path == model.station)
                 Text(model.path).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
                 Spacer()
                 Button("中转站") { model.enterStation() }
@@ -564,7 +599,9 @@ struct MainView: View {
             Divider()
             HStack {
                 Button("选择文件上传…") { model.chooseUpload() }.disabled(model.busy || model.loginRunning)
-                Text("右键下载，或拖到 Finder 文件夹").font(.caption).foregroundStyle(.secondary)
+                Button("删除") { model.selected.map(model.confirmDelete) }.disabled(model.busy || model.loginRunning || !model.canDelete(model.selected))
+                    .help("删除选中的中转站内容（可在网盘回收站找回）")
+                Text("右键下载或删除，或拖到 Finder 文件夹").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if model.busy { Button("停止") { model.stop() } }
             }.padding(12)

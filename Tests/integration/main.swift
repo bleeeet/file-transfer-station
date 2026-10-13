@@ -43,6 +43,18 @@ wait { !model.busy }
 precondition(model.status.hasPrefix("上传完成"), model.status)
 precondition(model.entries.contains(where: { $0.name == folder.lastPathComponent && $0.isDirectory }))
 print("文件夹上传通过：先建文件夹树再上传，空文件夹保留。")
+for name in [item.name, folder.lastPathComponent] {
+    model.delete(model.entries.first(where: { $0.name == name })!)
+    wait { !model.busy }
+    precondition(model.status.hasPrefix("已删除"), model.status)
+    precondition(!model.entries.contains(where: { $0.name == name }))
+}
+precondition(!model.canDelete(RemoteEntry(name: "文件中转站", path: "/文件中转站", size: "-", modified: "", isDirectory: true)))
+print("删除通过：文件和文件夹删除后列表核对，中转站本身不可删。")
+model.refresh("/")
+wait { !model.busy }
+precondition(model.path == "/文件中转站")
+print("浏览范围通过：请求上级目录时仍停在中转站。")
 model.beginLogin(username: "fixture-user", password: "fixture-password")
 wait { model.loginText.contains("请输入接收到的验证码") }
 model.submitLogin("123456")
