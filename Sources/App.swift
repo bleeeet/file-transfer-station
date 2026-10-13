@@ -525,7 +525,7 @@ struct MainView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                if let logo = Bundle.main.url(forResource: "BaiduLogo", withExtension: "png"), let image = NSImage(contentsOf: logo) {
+                if let logo = Bundle.main.url(forResource: "AppLogo", withExtension: "png"), let image = NSImage(contentsOf: logo) {
                     Image(nsImage: image).resizable().frame(width: 36, height: 36).clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 VStack(alignment: .leading, spacing: 3) { Text("文件中转站").font(.title3.bold()); Text("百度网盘 · " + model.account).font(.caption).foregroundStyle(.secondary) }

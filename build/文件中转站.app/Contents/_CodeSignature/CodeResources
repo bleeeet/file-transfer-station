@@ -6,11 +6,11 @@
 	<dict>
 		<key>Resources/AppIcon.icns</key>
 		<data>
-		hYqjGrrcRv5K5c331X6o+87xW8c=
+		D5yqjC/EFwlyyrcRFU8Rz3hIckY=
 		</data>
-		<key>Resources/BaiduLogo.png</key>
+		<key>Resources/AppLogo.png</key>
 		<data>
-		bluJA8VmmXmbSd4YqeaGMAS70Rc=
+		lY9EbkzF4u6oezNHt8pDG2IJ+Oo=
 		</data>
 		<key>Resources/BaiduPCS-Go</key>
 		<data>
@@ -27,14 +27,14 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			n17pJS3t+6wMTaVKYwmJ9InYrJj6p1KGWhKDY+075WM=
+			atSkaLzsXU2fURx3CCNGTi98HIkgKe4Y1lgrEKeQYrU=
 			</data>
 		</dict>
-		<key>Resources/BaiduLogo.png</key>
+		<key>Resources/AppLogo.png</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			WRwDyXgsfc9mEhjKja9z78exA7P3Oq6a1RM5FldGW7o=
+			s7wSyVY6JEOcLpskduxkWqboRBSj/qsqD3VRR+iINZ0=
 			</data>
 		</dict>
 		<key>Resources/BaiduPCS-Go</key>

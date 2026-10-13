@@ -105,7 +105,7 @@ swiftc -swift-version 5 Sources/Core.swift Tests/main.swift -o /tmp/coretest && 
 |---|---|
 | `Sources/Core.swift` | 目录解析、传输结果判定、版本号比较等纯逻辑 |
 | `Sources/App.swift` | 界面、调用 BaiduPCS-Go 子进程、Finder 拖拽下载、自动更新 |
-| `Resources/` | Info.plist、图标、内置 BaiduPCS-Go 及其许可证 |
+| `Resources/` | Info.plist、图标（`AppIcon.svg` 为源文件）、内置 BaiduPCS-Go 及其许可证 |
 | `Tests/` | Core 单元测试、集成测试和模拟 CLI |
 | `build/` | 构建产物 |
 | `安装包/` | 分发用 zip（只含 `.app`，不含登录配置、Cookie、用户文件或测试夹具） |
@@ -119,6 +119,7 @@ swiftc -swift-version 5 Sources/Core.swift Tests/main.swift -o /tmp/coretest && 
 
 ## 更新记录
 
+- **0.2.3**：换成原创图标（蓝色渐变底 + 白云 + 上下箭头），不再使用百度网盘 Logo。
 - **0.2.2**：右上角「登录账户」下方新增「检查更新」按钮。
 - **0.2.1**：logo 换成全蓝配色；点关闭按钮只关窗口，⌘Q 才退出；已登录时右上角按钮变为「退出登录」；点刷新按钮时也检查更新。
 - **0.2.0**：启动时自动检查 GitHub Release，一键下载替换并重启；README 重写。
@@ -126,4 +127,4 @@ swiftc -swift-version 5 Sources/Core.swift Tests/main.swift -o /tmp/coretest && 
 
 ## 许可与声明
 
-内置的 BaiduPCS-Go 遵循 Apache 2.0 许可证（见 `Resources/BaiduPCS-Go-LICENSE`）。百度网盘 Logo 来自其官方 App Store 页面，仅用于识别；本应用不是百度官方客户端，与百度公司无关。
+内置的 BaiduPCS-Go 遵循 Apache 2.0 许可证（见 `Resources/BaiduPCS-Go-LICENSE`）。应用图标为本项目原创（源文件 `Resources/AppIcon.svg`）。本应用不是百度官方客户端，与百度公司无关。
