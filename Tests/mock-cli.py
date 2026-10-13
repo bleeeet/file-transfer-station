@@ -30,7 +30,7 @@ elif cmd == 'ls':
         print(f'{i}  {"-" if x.is_dir() else str(x.stat().st_size)+" B"}  2026-10-13 12:00:00  {x.name}{"/" if x.is_dir() else ""}')
     print(f'文件总数: {sum(x.is_file() for x in items)}, 目录总数: {sum(x.is_dir() for x in items)}\n----')
 elif cmd == 'upload':
-    files = args[3:-1]; dest = target(args[-1]); dest.mkdir(parents=True, exist_ok=True)
+    files = [a for i, a in enumerate(args[1:-1], 1) if not a.startswith('-') and not args[i - 1].startswith('-')]; dest = target(args[-1]); dest.mkdir(parents=True, exist_ok=True)
     for name in files:
         p = pathlib.Path(name)
         # Like the real CLI, a missing remote folder fails the files inside it.
@@ -44,7 +44,7 @@ elif cmd == 'mv':
 elif cmd == 'rm':
     p = target(args[1]); p.rmdir(); print('删除成功')
 elif cmd == 'download':
-    dest = pathlib.Path(args[2]); p = target(args[3]); dest.mkdir(parents=True, exist_ok=True)
+    dest = pathlib.Path(args[args.index('--saveto') + 1]); p = target(args[-1]); dest.mkdir(parents=True, exist_ok=True)
     (shutil.copytree if p.is_dir() else shutil.copy2)(p, dest / p.name)
     print('[1] ↓ 512B/1.00KB 1.00KB/s in 1s, left 1s ............', flush=True); time.sleep(.2); print('下载结束, 数据总量: 1 KB')
 elif cmd == 'login':
