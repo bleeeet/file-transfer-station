@@ -631,7 +631,14 @@ enum Updater {
         alert.informativeText = "当前版本 \(current)。\n\n\(notes)".trimmingCharacters(in: .whitespacesAndNewlines)
         alert.addButton(withTitle: "立即更新"); alert.addButton(withTitle: "以后再说")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        guard Model.active?.busy != true, Model.active?.loginRunning != true else { return show("正在传输或登录，完成后重新打开应用即可更新。") }
+        download(tag, from: url)
+    }
+
+    static func download(_ tag: String, from url: URL) {
+        // 启动刷新、传输或登录进行中时，等它结束再下载替换
+        if Model.active?.busy == true || Model.active?.loginRunning == true {
+            return DispatchQueue.main.asyncAfter(deadline: .now() + 1) { download(tag, from: url) }
+        }
         Model.active?.status = "正在下载更新 \(tag)…"
         URLSession.shared.downloadTask(with: url) { file, _, error in
             do {
@@ -646,6 +653,7 @@ enum Updater {
                 _ = try FileManager.default.replaceItemAt(target, withItemAt: app)
                 try? FileManager.default.removeItem(at: dir)
                 DispatchQueue.main.async {
+                    if Model.active?.busy == true || Model.active?.loginRunning == true { Model.active?.status = "更新 \(tag) 已安装，下次打开生效"; return }
                     let relaunch = Process(); relaunch.executableURL = URL(fileURLWithPath: "/usr/bin/open"); relaunch.arguments = ["-n", target.path]
                     try? relaunch.run(); NSApp.terminate(nil)
                 }
