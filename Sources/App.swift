@@ -154,7 +154,7 @@ final class Model: ObservableObject {
             }
             DispatchQueue.main.async { self.status = "正在上传到文件中转站…" }
             // Uploads go straight into the station; same names were refused above, so nothing is overwritten.
-            // Measured from Tokyo with 300 MB: 4 threads ≈ 11 MB/s, 16 ≈ 22 MB/s.
+            // Measured on an overseas server with 300 MB: 4 threads ≈ 11 MB/s, 16 ≈ 22 MB/s.
             let (text, code) = try self.run(["upload", "-p", "16", "--policy", "skip"] + urls.map(\.path) + [self.station], live: true)
             let items = try self.list(self.station)
             DispatchQueue.main.async { self.path = self.station; self.entries = items }
@@ -176,7 +176,7 @@ final class Model: ObservableObject {
         let expected = item.isDirectory ? try expectedFiles(item.path) : [item.name]
         let temp = folder.appendingPathComponent(".中转站下载-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: false)
-        // SVIP measured from Tokyo: 1 thread ≈ 2 MB/s, 16 ≈ 34 MB/s, 32 adds little.
+        // SVIP measured on an overseas server: 1 thread ≈ 2 MB/s, 16 ≈ 34 MB/s, 32 adds little.
         let (text, code) = try run(["download", "-p", "16", "--saveto", temp.path, literalRemotePath(item.path)], live: true)
         guard transferSucceeded(text, code: code, operation: "下载") else { throw failure("下载未全部成功，临时文件保留在目标目录，未标记完成。") }
         guard !cancelled else { throw failure("下载已停止，未完成内容保留在临时目录") }
