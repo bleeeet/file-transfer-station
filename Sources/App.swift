@@ -28,6 +28,7 @@ final class Model: ObservableObject {
     @Published var progressText = ""
     let station = "/文件中转站"
     var process: Process?
+    var openMain: (() -> Void)?
     var loginProcess: Process?
     var master: FileHandle?
     var secrets: [String] = []
@@ -552,6 +553,7 @@ struct CloudTable: NSViewRepresentable {
 
 struct MainView: View {
     @ObservedObject var model = Model.shared
+    @Environment(\.openWindow) var openWindow
     @State var input = ""
     @State var username = ""
     @State var password = ""
@@ -625,7 +627,7 @@ struct MainView: View {
             }.padding(12).background(Color(nsColor: .controlBackgroundColor))
         }
         .frame(minWidth: 700, minHeight: 440)
-        .onAppear { model.refresh() }
+        .onAppear { model.openMain = { openWindow(id: "main") }; model.refresh() }
         .sheet(isPresented: $model.showLogin, onDismiss: { model.closeLogin() }) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("登录百度网盘").font(.title3.bold())
@@ -734,7 +736,21 @@ enum Updater {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) { Updater.check() }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.servicesProvider = self; NSUpdateDynamicServices()
+        Updater.check()
+    }
+    /// Finder 右键「上传到百度云中转站」：等手头的刷新/传输结束再上传。
+    @objc func uploadFiles(_ pboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        let urls = pboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        NSApp.activate(ignoringOtherApps: true); Model.shared.openMain?()
+        uploadWhenIdle(urls)
+    }
+    func uploadWhenIdle(_ urls: [URL]) {
+        let model = Model.shared
+        guard !model.busy, !model.loginRunning else { return DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.uploadWhenIdle(urls) } }
+        model.upload(urls)
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationWillTerminate(_ notification: Notification) {
         for process in [Model.active?.process, Model.active?.loginProcess].compactMap({ $0 }) where process.isRunning {
