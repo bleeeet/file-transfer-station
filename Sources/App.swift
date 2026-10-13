@@ -6,6 +6,7 @@ import WebKit
 
 final class Model: ObservableObject {
     static weak var active: Model?
+    static let shared = Model()   // 关窗口不退出：重开窗口沿用同一份状态和进行中的传输
     @Published var entries: [RemoteEntry] = []
     @Published var path = "/文件中转站"
     @Published var account = "未登录"
@@ -214,6 +215,18 @@ final class Model: ObservableObject {
         if let process {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if process.isRunning { process.terminate() } }
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
+        }
+    }
+    func logout() {
+        let alert = NSAlert(); alert.messageText = "退出百度网盘账号？"
+        alert.informativeText = "退出后需要重新扫码或输入密码登录。"
+        alert.addButton(withTitle: "退出登录"); alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        start("正在退出登录…") {
+            _ = try self.run(["logout", "-y"])
+            let (who, _) = try self.run(["who"])
+            if let name = loggedInAccount(who) { throw self.failure("退出失败，仍登录为 \(name)") }
+            DispatchQueue.main.async { self.account = "未登录"; self.entries = []; self.status = "已退出登录" }
         }
     }
     func showAuthentication() {
@@ -502,7 +515,7 @@ struct CloudTable: NSViewRepresentable {
 }
 
 struct MainView: View {
-    @StateObject var model = Model()
+    @ObservedObject var model = Model.shared
     @State var input = ""
     @State var username = ""
     @State var password = ""
@@ -517,7 +530,7 @@ struct MainView: View {
                 }
                 VStack(alignment: .leading, spacing: 3) { Text("文件中转站").font(.title3.bold()); Text("百度网盘 · " + model.account).font(.caption).foregroundStyle(.secondary) }
                 Spacer()
-                Button("登录账户") { model.showAuthentication() }.disabled(model.busy || model.loginRunning)
+                Button(model.account == "未登录" ? "登录账户" : "退出登录") { model.account == "未登录" ? model.showAuthentication() : model.logout() }.disabled(model.busy || model.loginRunning)
             }.padding(18)
             Divider()
             HStack {
@@ -558,8 +571,8 @@ struct MainView: View {
                     Text(model.status).font(.caption).lineLimit(2).textSelection(.enabled)
                     Spacer()
                     Button(details ? "收起" : "详情") { details.toggle() }.buttonStyle(.link)
-                    Button { model.refresh() } label: { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 15)) }
-                        .buttonStyle(.borderless).help("刷新云端文件列表").accessibilityLabel("刷新云端文件列表")
+                    Button { model.refresh(); Updater.check() } label: { Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 15)) }
+                        .buttonStyle(.borderless).help("刷新云端文件列表，并检查应用更新").accessibilityLabel("刷新云端文件列表")
                         .disabled(model.busy || model.loginRunning)
                 }
                 if let progress = model.progress {
@@ -615,14 +628,17 @@ enum Updater {
     static let latest = URL(string: "https://api.github.com/repos/bleeeet/file-transfer-station/releases/latest")!
     static var current: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
 
+    static var inProgress = false   // 已在弹窗或下载中，不重复提示
+
     static func check() {
+        guard !inProgress else { return }
         URLSession.shared.dataTask(with: latest) { data, _, _ in
             guard let data, let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                   let tag = json["tag_name"] as? String, isNewerVersion(tag, than: current),
                   let assets = json["assets"] as? [[String: Any]],
                   let link = assets.compactMap({ $0["browser_download_url"] as? String }).first(where: { $0.hasSuffix(".zip") }),
                   let url = URL(string: link) else { return }
-            DispatchQueue.main.async { offer(tag, notes: json["body"] as? String ?? "", from: url) }
+            DispatchQueue.main.async { guard !inProgress else { return }; inProgress = true; offer(tag, notes: json["body"] as? String ?? "", from: url) }
         }.resume()
     }
 
@@ -630,7 +646,7 @@ enum Updater {
         let alert = NSAlert(); alert.messageText = "发现新版本 \(tag)"
         alert.informativeText = "当前版本 \(current)。\n\n\(notes)".trimmingCharacters(in: .whitespacesAndNewlines)
         alert.addButton(withTitle: "立即更新"); alert.addButton(withTitle: "以后再说")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard alert.runModal() == .alertFirstButtonReturn else { inProgress = false; return }
         download(tag, from: url)
     }
 
@@ -658,7 +674,7 @@ enum Updater {
                     try? relaunch.run(); NSApp.terminate(nil)
                 }
             } catch {
-                DispatchQueue.main.async { Model.active?.status = "更新失败"; show("更新失败：\(error.localizedDescription)\n可到 GitHub Releases 手动下载。") }
+                DispatchQueue.main.async { inProgress = false; Model.active?.status = "更新失败"; show("更新失败：\(error.localizedDescription)\n可到 GitHub Releases 手动下载。") }
             }
         }.resume()
     }
@@ -668,7 +684,7 @@ enum Updater {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) { Updater.check() }
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationWillTerminate(_ notification: Notification) {
         for process in [Model.active?.process, Model.active?.loginProcess].compactMap({ $0 }) where process.isRunning {
             kill(process.processIdentifier, SIGKILL)
@@ -685,5 +701,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 @main struct TransferApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    var body: some Scene { WindowGroup("文件中转站") { MainView() }.defaultSize(width: 760, height: 530) }
+    var body: some Scene { Window("文件中转站", id: "main") { MainView() }.defaultSize(width: 760, height: 530) }
 }

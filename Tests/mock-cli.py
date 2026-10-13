@@ -19,7 +19,9 @@ if not args:
         if line.startswith('quit'): break
     sys.exit(0)
 cmd = args[0]
-if cmd == 'who': print('当前帐号 uid: 123, 用户名: 测试账户, 性别: , 年龄: 0.0')
+logged_out = root / '.logged-out'
+if cmd == 'who': print('当前帐号 uid: 0, 用户名: , 性别: , 年龄: 0.0' if logged_out.exists() else '当前帐号 uid: 123, 用户名: 测试账户, 性别: , 年龄: 0.0')
+elif cmd == 'logout': logged_out.touch(); print('退出用户成功')
 elif cmd == 'mkdir': target(args[1]).mkdir(parents=True, exist_ok=True); print('创建目录成功')
 elif cmd == 'ls':
     p = target(args[1])
