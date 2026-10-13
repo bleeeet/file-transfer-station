@@ -530,7 +530,10 @@ struct MainView: View {
                 }
                 VStack(alignment: .leading, spacing: 3) { Text("文件中转站").font(.title3.bold()); Text("百度网盘 · " + model.account).font(.caption).foregroundStyle(.secondary) }
                 Spacer()
-                Button(model.account == "未登录" ? "登录账户" : "退出登录") { model.account == "未登录" ? model.showAuthentication() : model.logout() }.disabled(model.busy || model.loginRunning)
+                VStack(alignment: .trailing, spacing: 6) {
+                    Button(model.account == "未登录" ? "登录账户" : "退出登录") { model.account == "未登录" ? model.showAuthentication() : model.logout() }.disabled(model.busy || model.loginRunning)
+                    Button("检查更新") { Updater.check(manual: true) }.help("当前版本 \(Updater.current)")
+                }
             }.padding(18)
             Divider()
             HStack {
@@ -630,14 +633,25 @@ enum Updater {
 
     static var inProgress = false   // 已在弹窗或下载中，不重复提示
 
-    static func check() {
+    /// manual：用户点「检查更新」时，没有新版或查询失败也弹窗告知；自动检查则静默。
+    static func check(manual: Bool = false) {
         guard !inProgress else { return }
         URLSession.shared.dataTask(with: latest) { data, _, _ in
             guard let data, let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                  let tag = json["tag_name"] as? String, isNewerVersion(tag, than: current),
-                  let assets = json["assets"] as? [[String: Any]],
+                  let tag = json["tag_name"] as? String else {
+                if manual { DispatchQueue.main.async { show("检查更新失败，请检查网络后重试。") } }
+                return
+            }
+            guard isNewerVersion(tag, than: current) else {
+                if manual { DispatchQueue.main.async { show("已是最新版本 \(current)") } }
+                return
+            }
+            guard let assets = json["assets"] as? [[String: Any]],
                   let link = assets.compactMap({ $0["browser_download_url"] as? String }).first(where: { $0.hasSuffix(".zip") }),
-                  let url = URL(string: link) else { return }
+                  let url = URL(string: link) else {
+                if manual { DispatchQueue.main.async { show("新版本 \(tag) 的安装包还没上传好，请稍后再试。") } }
+                return
+            }
             DispatchQueue.main.async { guard !inProgress else { return }; inProgress = true; offer(tag, notes: json["body"] as? String ?? "", from: url) }
         }.resume()
     }

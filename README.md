@@ -72,11 +72,11 @@ Apple Silicon，macOS 13 或更新版本。原生 SwiftUI/AppKit，内置 [Baidu
 
 ## 自动更新
 
-每次启动、以及每次点右下角的刷新按钮时，应用会查询本仓库的[最新 Release](https://github.com/bleeeet/file-transfer-station/releases/latest)：
+每次启动、每次点右下角的刷新按钮、或手动点右上角「检查更新」时，应用会查询本仓库的[最新 Release](https://github.com/bleeeet/file-transfer-station/releases/latest)：
 
 - 版本号比当前新 → 弹窗显示新版本和更新说明，可选「立即更新」或「以后再说」。
 - 点了更新 → 等当前的刷新/传输/登录结束后，下载 zip、核对是同一个应用、替换当前的 `.app` 并自动重启。如果下载完时又有传输在进行，就不打断，下次打开时生效。
-- 没网或查询失败 → 静默跳过，不影响使用。
+- 没网或查询失败 → 自动检查时静默跳过；手动点「检查更新」时会提示「已是最新版本」或「检查失败」。
 - 更新提示已经弹出或正在下载时，再点刷新不会重复弹窗。
 
 ## 开发与发版（多台电脑协作）
@@ -119,6 +119,7 @@ swiftc -swift-version 5 Sources/Core.swift Tests/main.swift -o /tmp/coretest && 
 
 ## 更新记录
 
+- **0.2.2**：右上角「登录账户」下方新增「检查更新」按钮。
 - **0.2.1**：logo 换成全蓝配色；点关闭按钮只关窗口，⌘Q 才退出；已登录时右上角按钮变为「退出登录」；点刷新按钮时也检查更新。
 - **0.2.0**：启动时自动检查 GitHub Release，一键下载替换并重启；README 重写。
 - **0.1.x**：上传/下载改用 16 线程；扫码登录改为原生实现（内嵌通行证页面手机确认后拿不到 BDUSS）；网页登录改用通行证登录页并获取 STOKEN；Cookie 导入兼容修复。
