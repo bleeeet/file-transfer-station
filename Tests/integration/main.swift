@@ -66,14 +66,12 @@ wait { promiseCount == 2 && !model.busy }
 precondition(promiseErrors == 0)
 precondition(FileManager.default.fileExists(atPath: dragged.appendingPathComponent(folder.lastPathComponent + "/子目录/更深/c.txt").path))
 print("批量下载通过：多选下载内容一致、同名拒绝不覆盖、多项拖拽依次完成。")
-for name in [item.name, folder.lastPathComponent] {
-    model.delete(model.entries.first(where: { $0.name == name })!)
-    wait { !model.busy }
-    precondition(model.status.hasPrefix("已删除"), model.status)
-    precondition(!model.entries.contains(where: { $0.name == name }))
-}
+model.delete([item, folderItem])
+wait { !model.busy }
+precondition(model.status.hasPrefix("已删除 2 项"), model.status)
+precondition(!model.entries.contains(where: { $0.name == item.name || $0.name == folder.lastPathComponent }))
 precondition(!model.canDelete(RemoteEntry(name: "文件中转站", path: "/文件中转站", size: "-", modified: "", isDirectory: true)))
-print("删除通过：文件和文件夹删除后列表核对，中转站本身不可删。")
+print("批量删除通过：文件和文件夹一起删除后列表核对，中转站本身不可删。")
 model.refresh("/")
 wait { !model.busy }
 precondition(model.path == "/文件中转站")

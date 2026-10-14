@@ -237,24 +237,31 @@ final class Model: ObservableObject {
         }
     }
     func canDelete(_ item: RemoteEntry?) -> Bool { item.map { $0.path.hasPrefix(station + "/") } ?? false }
-    func confirmDelete(_ item: RemoteEntry) {
-        guard canDelete(item), !busy, !loginRunning else { return }
-        let alert = NSAlert(); alert.messageText = "删除「\(item.name)」？"
-        alert.informativeText = (item.isDirectory ? "整个文件夹及其中内容都会删除。" : "") + "删除后可在百度网盘回收站找回。"
+    func confirmDelete(_ items: [RemoteEntry]) {
+        guard !items.isEmpty, items.allSatisfy(canDelete), !busy, !loginRunning else { return }
+        let alert = NSAlert(); alert.messageText = items.count == 1 ? "删除「\(items[0].name)」？" : "删除选中的 \(items.count) 项？"
+        alert.informativeText = (items.contains(where: \.isDirectory) ? "文件夹及其中内容都会删除。" : "") + "删除后可在百度网盘回收站找回。"
         alert.alertStyle = .warning
         alert.addButton(withTitle: "删除"); alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        delete(item)
+        delete(items)
     }
-    func delete(_ item: RemoteEntry) {
+    func delete(_ items: [RemoteEntry]) {
         let folder = path
-        start("正在删除 \(item.name)…") {
-            let (text, code) = try self.run(["rm", literalRemotePath(item.path)])
-            let items = try self.list(folder)
-            DispatchQueue.main.async { self.entries = items }
+        start(items.count == 1 ? "正在删除 \(items[0].name)…" : "正在删除 \(items.count) 项…") {
+            var output = ""
+            for item in items {
+                guard !self.cancelled else { break }
+                output += (try? self.run(["rm", literalRemotePath(item.path)]).0) ?? ""
+            }
+            let listing = try self.list(folder)
+            DispatchQueue.main.async { self.entries = listing }
             // Judge by the listing, not the CLI's wording.
-            guard code == 0, !items.contains(where: { $0.path == item.path }) else { throw self.failure("删除失败：" + transferFailureLines(text)) }
-            DispatchQueue.main.async { self.status = "已删除 \(item.name) · 可在网盘回收站找回" }
+            let left = items.filter { item in listing.contains(where: { $0.path == item.path }) }
+            guard left.isEmpty else {
+                throw self.failure("已删除 \(items.count - left.count)/\(items.count) 项；未删除：" + left.map(\.name).joined(separator: "、") + (self.cancelled ? "" : "。" + transferFailureLines(output)))
+            }
+            DispatchQueue.main.async { self.status = (items.count == 1 ? "已删除 \(items[0].name)" : "已删除 \(items.count) 项") + " · 可在网盘回收站找回" }
         }
     }
     func stop() {
@@ -559,7 +566,7 @@ struct CloudTable: NSViewRepresentable {
             return rows.filter { items.indices.contains($0) }.map { items[$0] }
         }
         @objc func downloadRow() { model.chooseDownload(menuTargets) }
-        @objc func deleteRow() { menuTargets.first.map(model.confirmDelete) }
+        @objc func deleteRow() { model.confirmDelete(menuTargets) }
         func tableViewSelectionDidChange(_ notification: Notification) {
             model.selection = (table?.selectedRowIndexes ?? []).filter { items.indices.contains($0) }.map { items[$0] }
         }
@@ -568,7 +575,7 @@ struct CloudTable: NSViewRepresentable {
             let targets = menuTargets
             guard !targets.isEmpty, !model.busy, !model.loginRunning else { return }
             menu.addItem(withTitle: targets.count == 1 ? "下载到…" : "下载 \(targets.count) 项到…", action: #selector(downloadRow), keyEquivalent: "").target = self
-            if targets.count == 1, model.canDelete(targets[0]) { menu.addItem(withTitle: "删除", action: #selector(deleteRow), keyEquivalent: "").target = self }
+            if targets.allSatisfy(model.canDelete) { menu.addItem(withTitle: targets.count == 1 ? "删除" : "删除 \(targets.count) 项", action: #selector(deleteRow), keyEquivalent: "").target = self }
         }
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
             guard !model.busy else { return nil }
@@ -633,7 +640,7 @@ struct MainView: View {
                 Button("选择文件上传…") { model.chooseUpload() }.disabled(model.busy || model.loginRunning)
                 Button(model.selection.count > 1 ? "下载 \(model.selection.count) 项…" : "下载…") { model.chooseDownload(model.selection) }
                     .disabled(model.busy || model.loginRunning || model.selection.isEmpty).help("下载选中的内容；按住 ⌘ 或 ⇧ 可多选")
-                Button("删除") { model.selection.first.map(model.confirmDelete) }.disabled(model.busy || model.loginRunning || model.selection.count != 1 || !model.canDelete(model.selection.first))
+                Button(model.selection.count > 1 ? "删除 \(model.selection.count) 项" : "删除") { model.confirmDelete(model.selection) }.disabled(model.busy || model.loginRunning || model.selection.isEmpty || !model.selection.allSatisfy(model.canDelete))
                     .help("删除选中的中转站内容（可在网盘回收站找回）")
                 Text("⌘/⇧ 多选，右键下载或删除，或拖到 Finder 文件夹").font(.caption).foregroundStyle(.secondary)
                 Spacer()
