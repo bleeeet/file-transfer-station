@@ -20,7 +20,7 @@ wait { !model.busy }
 guard let item = model.entries.first(where: { $0.name == file.lastPathComponent }) else { fatalError("上传发布结果缺失") }
 let downloads = local.appendingPathComponent("下载")
 try FileManager.default.createDirectory(at: downloads, withIntermediateDirectories: true)
-model.download(item, to: downloads)
+model.download([item], to: downloads)
 wait { !model.busy }
 let original = try Data(contentsOf: file)
 let downloaded = try Data(contentsOf: downloads.appendingPathComponent(item.name))
@@ -43,6 +43,29 @@ wait { !model.busy }
 precondition(model.status.hasPrefix("上传完成"), model.status)
 precondition(model.entries.contains(where: { $0.name == folder.lastPathComponent && $0.isDirectory }))
 print("文件夹上传通过：先建文件夹树再上传，空文件夹保留。")
+let batch = local.appendingPathComponent("批量下载")
+try FileManager.default.createDirectory(at: batch, withIntermediateDirectories: true)
+let folderItem = model.entries.first(where: { $0.name == folder.lastPathComponent })!
+model.download([item, folderItem], to: batch)
+wait { !model.busy }
+precondition(model.status.hasPrefix("下载完成 2 项"), model.status)
+precondition((try? Data(contentsOf: batch.appendingPathComponent(item.name))) == original)
+precondition(FileManager.default.fileExists(atPath: batch.appendingPathComponent(folder.lastPathComponent + "/子目录/更深/c.txt").path))
+model.download([item, folderItem], to: batch)
+wait { !model.busy }
+precondition(model.status.contains("已有同名内容"), model.status)
+let dragged = local.appendingPathComponent("多项拖拽")
+try FileManager.default.createDirectory(at: dragged, withIntermediateDirectories: true)
+var promiseErrors = 0, promiseCount = 0
+for entry in [item, folderItem] {
+    model.promisedDownload(entry, to: dragged.appendingPathComponent(entry.name)) { error in
+        DispatchQueue.main.async { promiseCount += 1; if error != nil { promiseErrors += 1 } }
+    }
+}
+wait { promiseCount == 2 && !model.busy }
+precondition(promiseErrors == 0)
+precondition(FileManager.default.fileExists(atPath: dragged.appendingPathComponent(folder.lastPathComponent + "/子目录/更深/c.txt").path))
+print("批量下载通过：多选下载内容一致、同名拒绝不覆盖、多项拖拽依次完成。")
 for name in [item.name, folder.lastPathComponent] {
     model.delete(model.entries.first(where: { $0.name == name })!)
     wait { !model.busy }

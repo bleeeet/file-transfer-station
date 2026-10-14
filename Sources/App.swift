@@ -23,7 +23,7 @@ final class Model: ObservableObject {
     var webLogin = false
     var loginOutput = ""
     var loginDirectory: URL?
-    @Published var selected: RemoteEntry?
+    @Published var selection: [RemoteEntry] = []
     @Published var progress: Double? = nil
     @Published var progressText = ""
     let station = "/文件中转站"
@@ -33,6 +33,7 @@ final class Model: ObservableObject {
     var master: FileHandle?
     var secrets: [String] = []
     var cancelled = false
+    var promises = 0   // Finder 一次拖出多项时，排队中的文件承诺数
     let queue = DispatchQueue(label: "transfer.serial")
     let config: URL
     var executable: URL { Bundle.main.url(forResource: "BaiduPCS-Go", withExtension: nil)! }
@@ -166,12 +167,15 @@ final class Model: ObservableObject {
             DispatchQueue.main.async { self.path = self.station; self.entries = items; self.status = "上传完成 · 其他设备刷新中转站即可下载"; self.progress = 1 }
         }
     }
-    func chooseDownload(_ item: RemoteEntry) {
-        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.prompt = "下载到这里"
+    func chooseDownload(_ items: [RemoteEntry]) {
+        guard !items.isEmpty else { return }
+        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
+        panel.prompt = items.count == 1 ? "下载到这里" : "下载 \(items.count) 项到这里"
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        if panel.runModal() == .OK, let folder = panel.url { download(item, to: folder) }
+        if panel.runModal() == .OK, let folder = panel.url { download(items, to: folder) }
     }
     func downloadWork(_ item: RemoteEntry, to destination: URL) throws {
+        guard !cancelled else { throw failure("下载已停止") }
         let folder = destination.deletingLastPathComponent()
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw failure("目标已有同名文件，请选择其他目录。") }
         let expected = item.isDirectory ? try expectedFiles(item.path) : [item.name]
@@ -200,15 +204,35 @@ final class Model: ObservableObject {
         }
         return files
     }
-    func download(_ item: RemoteEntry, to folder: URL) { start("正在下载 \(item.name)…") { try self.downloadWork(item, to: folder.appendingPathComponent(item.name)) } }
+    func download(_ items: [RemoteEntry], to folder: URL) {
+        guard !items.isEmpty else { return }
+        start(items.count == 1 ? "正在下载 \(items[0].name)…" : "正在下载 \(items.count) 项…") {
+            let taken = items.filter { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0.name).path) }
+            guard taken.isEmpty else { throw self.failure("目标目录已有同名内容：" + taken.map(\.name).joined(separator: "、") + "。请选择其他目录。") }
+            guard items.count > 1 else { return try self.downloadWork(items[0], to: folder.appendingPathComponent(items[0].name)) }
+            // 逐项下载；某项失败不影响其余项，最后如实汇报。
+            var failed: [String] = [], done = 0
+            for (i, item) in items.enumerated() {
+                guard !self.cancelled else { break }
+                DispatchQueue.main.async { self.status = "正在下载 \(i + 1)/\(items.count) · \(item.name)"; self.progress = nil; self.progressText = "" }
+                do { try self.downloadWork(item, to: folder.appendingPathComponent(item.name)); done += 1 } catch { failed.append(item.name) }
+            }
+            guard !self.cancelled else { throw self.failure("下载已停止，已完成 \(done)/\(items.count) 项；未完成的内容保留在目标目录的临时文件夹里") }
+            guard failed.isEmpty else { throw self.failure("已下载 \(done)/\(items.count) 项；未完成：" + failed.joined(separator: "、")) }
+            DispatchQueue.main.async { self.status = "下载完成 \(items.count) 项 · " + folder.path; self.progress = 1 }
+        }
+    }
     func promisedDownload(_ item: RemoteEntry, to destination: URL, completion: @escaping (Error?) -> Void) {
         DispatchQueue.main.async {
-            guard !self.busy else { completion(self.failure("已有传输正在进行，请稍后重试")); return }
-            self.busy = true; self.cancelled = false; self.status = "正在下载 \(item.name)…"; self.log = ""; self.progress = nil; self.progressText = ""
+            // 同一次拖拽的多项依次排进串行队列；其他传输进行中则拒绝。
+            guard self.promises > 0 || !self.busy else { completion(self.failure("已有传输正在进行，请稍后重试")); return }
+            if self.promises == 0 { self.busy = true; self.cancelled = false; self.log = "" }
+            self.promises += 1
             self.queue.async {
+                DispatchQueue.main.async { self.status = "正在下载 \(item.name)…"; self.progress = nil; self.progressText = "" }
                 do { try self.downloadWork(item, to: destination); completion(nil) }
                 catch { completion(error); DispatchQueue.main.async { self.status = "未完成：" + self.safe(error.localizedDescription); self.progress = nil } }
-                DispatchQueue.main.async { self.busy = false }
+                DispatchQueue.main.async { self.promises -= 1; if self.promises == 0 { self.busy = false } }
             }
         }
     }
@@ -495,7 +519,7 @@ struct CloudTable: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let table = NSTableView(); table.delegate = context.coordinator; table.dataSource = context.coordinator
         table.rowHeight = 34; table.usesAlternatingRowBackgroundColors = true
-        table.allowsMultipleSelection = false
+        table.allowsMultipleSelection = true   // ⌘ 点选、⇧ 连选
         for (id, title, width) in [("name", "名称", 360.0), ("size", "大小", 100.0), ("date", "修改时间", 170.0)] {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id)); column.title = title; column.width = width; table.addTableColumn(column)
         }
@@ -510,7 +534,7 @@ struct CloudTable: NSViewRepresentable {
         let old = context.coordinator.items, new = model.entries
         guard old.map(\.id) != new.map(\.id) || old.map(\.modified) != new.map(\.modified) else { return }
         context.coordinator.items = new; (view.documentView as? NSTableView)?.reloadData()
-        DispatchQueue.main.async { model.selected = nil }
+        DispatchQueue.main.async { model.selection = [] }
     }
     final class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource, NSFilePromiseProviderDelegate, NSMenuDelegate {
         let model: Model; var items: [RemoteEntry] = []; weak var table: NSTableView?
@@ -527,18 +551,24 @@ struct CloudTable: NSViewRepresentable {
             label.frame = NSRect(x: id == "name" ? 33 : 8, y: 8, width: (tableColumn?.width ?? 100) - (id == "name" ? 38 : 12), height: 19)
             label.autoresizingMask = [.width]; cell.addSubview(label); cell.textField = label; return cell
         }
-        @objc func openRow() { guard let row = table?.clickedRow, items.indices.contains(row) else { return }; if items[row].isDirectory { model.refresh(items[row].path) } else { model.chooseDownload(items[row]) } }
-        @objc func downloadRow() { guard let row = table?.clickedRow, items.indices.contains(row) else { return }; model.chooseDownload(items[row]) }
-        @objc func deleteRow() { guard let row = table?.clickedRow, items.indices.contains(row) else { return }; model.confirmDelete(items[row]) }
+        @objc func openRow() { guard let row = table?.clickedRow, items.indices.contains(row) else { return }; if items[row].isDirectory { model.refresh(items[row].path) } else { model.chooseDownload([items[row]]) } }
+        // 右键点在选中项上就作用于全部选中项，否则只作用于点到的那一行（同 Finder）。
+        var menuTargets: [RemoteEntry] {
+            guard let table, items.indices.contains(table.clickedRow) else { return [] }
+            let rows = table.selectedRowIndexes.contains(table.clickedRow) ? table.selectedRowIndexes : [table.clickedRow]
+            return rows.filter { items.indices.contains($0) }.map { items[$0] }
+        }
+        @objc func downloadRow() { model.chooseDownload(menuTargets) }
+        @objc func deleteRow() { menuTargets.first.map(model.confirmDelete) }
         func tableViewSelectionDidChange(_ notification: Notification) {
-            let row = table?.selectedRow ?? -1
-            model.selected = items.indices.contains(row) ? items[row] : nil
+            model.selection = (table?.selectedRowIndexes ?? []).filter { items.indices.contains($0) }.map { items[$0] }
         }
         func menuNeedsUpdate(_ menu: NSMenu) {
             menu.removeAllItems()
-            guard let row = table?.clickedRow, items.indices.contains(row), !model.busy, !model.loginRunning else { return }
-            menu.addItem(withTitle: "下载到…", action: #selector(downloadRow), keyEquivalent: "").target = self
-            if model.canDelete(items[row]) { menu.addItem(withTitle: "删除", action: #selector(deleteRow), keyEquivalent: "").target = self }
+            let targets = menuTargets
+            guard !targets.isEmpty, !model.busy, !model.loginRunning else { return }
+            menu.addItem(withTitle: targets.count == 1 ? "下载到…" : "下载 \(targets.count) 项到…", action: #selector(downloadRow), keyEquivalent: "").target = self
+            if targets.count == 1, model.canDelete(targets[0]) { menu.addItem(withTitle: "删除", action: #selector(deleteRow), keyEquivalent: "").target = self }
         }
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
             guard !model.busy else { return nil }
@@ -601,9 +631,11 @@ struct MainView: View {
             Divider()
             HStack {
                 Button("选择文件上传…") { model.chooseUpload() }.disabled(model.busy || model.loginRunning)
-                Button("删除") { model.selected.map(model.confirmDelete) }.disabled(model.busy || model.loginRunning || !model.canDelete(model.selected))
+                Button(model.selection.count > 1 ? "下载 \(model.selection.count) 项…" : "下载…") { model.chooseDownload(model.selection) }
+                    .disabled(model.busy || model.loginRunning || model.selection.isEmpty).help("下载选中的内容；按住 ⌘ 或 ⇧ 可多选")
+                Button("删除") { model.selection.first.map(model.confirmDelete) }.disabled(model.busy || model.loginRunning || model.selection.count != 1 || !model.canDelete(model.selection.first))
                     .help("删除选中的中转站内容（可在网盘回收站找回）")
-                Text("右键下载或删除，或拖到 Finder 文件夹").font(.caption).foregroundStyle(.secondary)
+                Text("⌘/⇧ 多选，右键下载或删除，或拖到 Finder 文件夹").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if model.busy { Button("停止") { model.stop() } }
             }.padding(12)
